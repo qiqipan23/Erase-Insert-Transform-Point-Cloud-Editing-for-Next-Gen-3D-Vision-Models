@@ -201,7 +201,7 @@ Rendering the physically-edited scene at high resolution with instance labels ma
 
 ## Contact
 
-Qiqi Pan — qiqi.pan23@gmail.com
+Qiqi Pan — qiqi.pan23@imperial.ac.uk
 
 ## License
 
