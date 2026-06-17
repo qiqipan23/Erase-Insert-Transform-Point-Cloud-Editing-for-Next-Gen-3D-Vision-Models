@@ -72,10 +72,7 @@ Erase-Insert-Transform/
 │   ├── GPT4o-text/
 │   └── llama/
 │
-├── pipeline/                     # MOVE pipeline runners (PBS + Python)
-│   ├── run_move_pipeline_v2.pbs  # PBS array: run all edit jobs
-│   ├── run_convonet_bkgd.pbs     # PBS: ConvONet background completion
-│   ├── run_pbic_inst.pbs         # PBS: SCCNet object completion
+├── pipeline/                     # MOVE pipeline runners
 │   ├── run_pbic_inst.py          # SCCNet runner
 │   ├── patch_bkgd_pointclouds.py # Patch fill points into ConvONet input
 │   ├── combine_move_result.py    # Merge completed bkgd + placed object
