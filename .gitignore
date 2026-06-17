@@ -42,6 +42,11 @@ dataset/
 # Third-party repos (install separately)
 repo/
 
+# Dissertation figure generation scripts (not part of the public pipeline)
+generate_*.py
+visualize_*.py
+view_convonet_result.py
+
 # One-off job-specific debug/repair scripts (not part of general pipeline)
 patch_job015_npz.py
 infer_job014.py
