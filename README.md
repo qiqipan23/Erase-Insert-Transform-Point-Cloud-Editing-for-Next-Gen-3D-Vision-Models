@@ -1,6 +1,6 @@
 # Erase, Insert, Transform: Point Cloud Editing for Next-Gen 3D Vision Models
 
-**Imperial College London** — MEng/MSc Dissertation Project
+**Imperial College London** 
 
 ---
 
