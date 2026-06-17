@@ -1,0 +1,103 @@
+#!/bin/bash
+#PBS -N convonet_bkgd
+#PBS -l select=1:ncpus=8:mem=32gb
+#PBS -l walltime=04:00:00
+#PBS -q v1_small72
+
+set -e
+cd /rds/general/user/qp23/home/Hypo3D
+
+source /rds/general/user/qp23/home/miniconda3/etc/profile.d/conda.sh
+conda activate placeit3d
+
+PYTHON=/rds/general/user/qp23/home/miniconda3/envs/placeit3d/bin/python
+O3D=/rds/general/user/qp23/home/miniconda3/envs/o3d/bin/python
+export LD_LIBRARY_PATH=/rds/general/user/qp23/home/miniconda3/envs/placeit3d/lib:$LD_LIBRARY_PATH
+
+CONVONET_ROOT=/rds/general/user/qp23/home/Hypo3D/repo/convolutional_occupancy_networks
+SCENE_ID=scene0000_00
+COMP_BASE=repo/scannet/processed/${SCENE_ID}/completion
+
+# ── Step 0: rebuild pointcloud.npz with full scene scan + fill features ────────
+echo "========================================"
+echo "Step 0: rebuild ConvONet inputs (full scene scan + structural fill)"
+echo "========================================"
+echo "[step 0] pointcloud.npz already rebuilt — skipping" # ${PYTHON} rebuild_bkgd_pointclouds.py
+
+for j in 0 1 2 3 4; do
+    JOB_ID="${SCENE_ID}_job00${j}_bkgd"
+    COMP_DIR=${COMP_BASE}/${JOB_ID}
+    CFG=configs/pointcloud_crop/hypo3d_${JOB_ID}.yaml
+    OUT_DIR=${CONVONET_ROOT}/out/hypo3d_${JOB_ID}/generation/meshes/scannet_remove/${JOB_ID}
+
+    echo ""
+    echo "========================================"
+    echo "ConvONet generate: ${JOB_ID}"
+    echo "========================================"
+
+    # Clear old outputs so pipeline runs fresh
+    for f in convonet_completed_mesh.off convonet_completed_points.ply \
+              completed_scene_merged.ply poisson_completion_mesh.ply \
+              poisson_scene_mesh.ply completed_scene_pointcloud.ply \
+              bkgd_completion_comparison.png merge_stats.json; do
+        [ -f "${COMP_DIR}/${f}" ] && rm "${COMP_DIR}/${f}" && echo "  deleted ${f}"
+    done
+
+    # ── ConvONet inference ─────────────────────────────────────────────────────
+    cd ${CONVONET_ROOT}
+    ${PYTHON} generate.py ${CFG} --no-cuda
+    cd /rds/general/user/qp23/home/Hypo3D
+
+    # Copy .off to completion dir
+    OFF_FILE=$(ls ${OUT_DIR}/*.off 2>/dev/null | head -1)
+    if [ -z "$OFF_FILE" ]; then
+        echo "[ERROR] No .off found in ${OUT_DIR}"
+        continue
+    fi
+    cp "$OFF_FILE" "${COMP_DIR}/convonet_completed_mesh.off"
+    echo "[done] mesh → ${COMP_DIR}/convonet_completed_mesh.off  ($(du -sh ${COMP_DIR}/convonet_completed_mesh.off | cut -f1))"
+
+    PLACEIT=/rds/general/user/qp23/home/miniconda3/envs/placeit3d/bin/python
+
+    # Step 2: sample ConvONet mesh → convonet_completed_points.ply
+    echo "[step 2] merge_completion_scene (sample + merge)"
+    ${PLACEIT} repo/scannet/merge_completion_scene.py --completion-dir ${COMP_DIR} \
+        --use-fill-region --fill-region-dilation 0.08
+
+    # Step 2b: filter ConvONet points by proximity to structural fill
+    echo "[step 2b] structural fill proximity filter"
+    ${O3D} /rds/general/user/qp23/home/Hypo3D/filter_by_structural_fill.py --job ${j} --threshold 0.35
+
+    # Step 2c: re-merge with filtered samples
+    echo "[step 2c] re-merge with filtered samples"
+    ${PLACEIT} repo/scannet/merge_completion_scene.py --completion-dir ${COMP_DIR} \
+        --use-fill-region --fill-region-dilation 0.08 --use-existing-samples
+
+    # Step 3: Poisson fill-region
+    echo "[step 3] poisson fill region"
+    ${O3D} repo/scannet/poisson_completion.py \
+        --completion-dir ${COMP_DIR} \
+        --depth 9 --max-dist 0.15 \
+        --out-name poisson_completion_mesh.ply
+
+    # Step 4: Poisson full scene
+    echo "[step 4] poisson full scene"
+    ${O3D} repo/scannet/poisson_completion.py \
+        --completion-dir ${COMP_DIR} \
+        --full-scene --depth 9 --max-dist 0.05 \
+        --out-name poisson_scene_mesh.ply
+
+    # Step 5: mesh to point cloud
+    echo "[step 5] mesh_to_pointcloud"
+    ${O3D} repo/scannet/mesh_to_pointcloud.py --completion-dir ${COMP_DIR}
+
+    # Step 6: visualize
+    echo "[step 6] visualize"
+    ${O3D} visualize_move_bkgd.py --job ${j} \
+        --output ${COMP_DIR}/bkgd_completion_comparison.png
+
+    echo "[$(date)] Done ${JOB_ID}"
+done
+
+echo ""
+echo "All 5 bkgd jobs complete."

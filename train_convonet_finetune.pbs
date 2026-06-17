@@ -1,0 +1,10 @@
+#!/bin/bash
+#PBS -l select=1:ncpus=8:mem=64gb:ngpus=1:gpu_type=L40S
+#PBS -l walltime=12:00:00
+#PBS -N convonet_finetune
+
+cd /rds/general/user/qp23/home/Hypo3D/repo/convolutional_occupancy_networks
+source /rds/general/user/qp23/home/miniconda3/etc/profile.d/conda.sh
+conda activate conv_onet
+
+python train.py configs/pointcloud_crop/hypo3d_scannet_finetune.yaml 2>&1 | tee /rds/general/user/qp23/home/Hypo3D/train_convonet_finetune.log

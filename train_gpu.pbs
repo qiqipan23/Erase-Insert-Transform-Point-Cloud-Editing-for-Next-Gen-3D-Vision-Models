@@ -1,0 +1,17 @@
+#!/bin/bash
+#PBS -l select=1:ngpus=1
+#PBS -l walltime=12:00:00
+#PBS -o /rds/general/user/qp23/home/Hypo3D/repo/convolutional_occupancy_networks/out/train_gpu.log
+#PBS -e /rds/general/user/qp23/home/Hypo3D/repo/convolutional_occupancy_networks/out/train_gpu_err.log
+#PBS -N hypo3d_train_gpu
+
+# Load CUDA/CUDNN modules
+module load NCCL/2.18.3-GCCcore-12.3.0-CUDA-12.1.1
+
+# Activate conda environment
+source /rds/general/user/qp23/home/miniconda3/etc/profile.d/conda.sh
+conda activate placeit3d
+
+# Run training
+cd /rds/general/user/qp23/home/Hypo3D/repo/convolutional_occupancy_networks
+python train.py configs/pointcloud_crop/hypo3d_scannet_remove_train_test_gpu.yaml

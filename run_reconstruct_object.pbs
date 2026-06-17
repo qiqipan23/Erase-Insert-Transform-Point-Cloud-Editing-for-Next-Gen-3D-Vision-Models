@@ -1,0 +1,26 @@
+#!/bin/bash
+#PBS -N reconstruct_object
+#PBS -l select=1:ncpus=4:mem=16gb:ngpus=1
+#PBS -l walltime=01:00:00
+#PBS -q v1_gpu72
+
+set -e
+cd /rds/general/user/qp23/home/Hypo3D
+
+export PATH=/rds/general/user/qp23/home/miniconda3/envs/triposr/bin:$PATH
+export LD_LIBRARY_PATH=/rds/general/user/qp23/home/miniconda3/envs/triposr/lib:$LD_LIBRARY_PATH
+
+# Set HuggingFace cache to scratch so model weights don't fill home quota
+export HF_HOME=/rds/general/user/qp23/ephemeral/hf_cache
+mkdir -p $HF_HOME
+
+SCENE=${SCENE:-scene0000_00}
+INSTANCE=${INSTANCE:-8}
+
+python3 repo/scannet/reconstruct_object.py \
+    --scene ${SCENE} \
+    --instance ${INSTANCE} \
+    --device cuda \
+    --mc-resolution 256
+
+echo "Done."

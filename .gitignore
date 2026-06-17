@@ -1,0 +1,67 @@
+# PBS job output files (stdout/stderr from HPC scheduler)
+*.e[0-9][0-9][0-9][0-9][0-9][0-9][0-9]
+*.o[0-9][0-9][0-9][0-9][0-9][0-9][0-9]
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Model weights and large binaries
+*.pth
+*.zip
+*.npz
+
+# Virtual environment
+.venv/
+
+# Scratch / temp directories
+.trash/
+.codex
+.agents/
+.claude/
+
+# Generated figures (produced by generate_*.py scripts)
+figs/
+*.png
+*.svg
+*.pdf
+
+# Log files
+*.log
+completion_all_logs/
+logs/
+
+# Derived / intermediate data (too large for git)
+derived/
+inst_orig/
+
+# Large dataset (stored separately on gdrive/HPC scratch)
+dataset/
+
+# Third-party repos (install separately)
+repo/
+
+# One-off job-specific debug/repair scripts (not part of general pipeline)
+patch_job015_npz.py
+infer_job014.py
+resume_hires_eval.py
+run_hires_eval.sh
+triposr_crop_desk.py
+test_pointsea.py
+vis_v2_scene0000.py
+vis_v2_scene0000.pbs
+convonet_job015_official.pbs
+convonet_structfill_job015.pbs
+convonet_retrainfeat.pbs
+rerun_struct_job015.pbs
+repair_job000.pbs
+rebuild_hs_floor_v2.pbs
+rebuild_hs_wall_v2.pbs
+run_job015_pretrained_from_active_structfill.pbs
+run_job015_pretrained_from_correct_structfill_v2.pbs
+run_job015_pretrained_from_old_structfill.pbs
+run_job015_with_plane_fill.pbs
+run_job017_plane_fill.pbs
+run_hires_eval.sh
+setup_pbic_env.pbs

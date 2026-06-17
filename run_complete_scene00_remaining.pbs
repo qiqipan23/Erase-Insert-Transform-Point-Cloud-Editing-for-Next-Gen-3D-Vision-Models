@@ -1,0 +1,123 @@
+#!/bin/bash
+#PBS -N complete_scene00
+#PBS -l select=1:ncpus=4:mem=16gb:ngpus=1:gpu_type=RTX6000
+#PBS -l walltime=04:00:00
+#PBS -q v1_gpu72
+
+set -e
+cd /rds/general/user/qp23/home/Hypo3D
+
+source /rds/general/user/qp23/home/miniconda3/etc/profile.d/conda.sh
+conda activate placeit3d
+export PYTHONUNBUFFERED=1
+export LD_LIBRARY_PATH=/rds/general/user/qp23/home/miniconda3/envs/pbic/lib:/rds/general/user/qp23/home/miniconda3/envs/placeit3d/lib/python3.9/site-packages/torch/lib:/rds/general/user/qp23/home/miniconda3/envs/placeit3d/lib:$LD_LIBRARY_PATH
+
+PY=/rds/general/user/qp23/home/miniconda3/envs/placeit3d/bin/python
+O3D=/rds/general/user/qp23/home/miniconda3/envs/o3d/bin/python
+CONVONET=/rds/general/user/qp23/home/Hypo3D/repo/convolutional_occupancy_networks
+MODEL_FILE=${CONVONET}/out/hypo3d_scannet_remove_mask_train/model.pt
+INHERIT_CFG=configs/pointcloud_crop/demo_matterport.yaml
+
+EDIT_DIR=repo/scannet/processed/scene0000_00/edits
+
+# job index → edit file mapping for scene0000_00 jobs 005-017
+declare -A EDIT_FILES
+EDIT_FILES[5]="job005_backpack_move_bkgd.ply"
+EDIT_FILES[6]="job006_trash_can_move_bkgd.ply"
+EDIT_FILES[7]="job007_guitar_move_bkgd.ply"
+EDIT_FILES[8]="job008_guitar_move_bkgd.ply"
+EDIT_FILES[9]="job009_bed_move_bkgd.ply"
+EDIT_FILES[10]="job010_bicycle_move_bkgd.ply"
+EDIT_FILES[11]="job011_bicycle_move_bkgd.ply"
+EDIT_FILES[12]="job012_trash_can_move_bkgd.ply"
+EDIT_FILES[13]="job013_pillow_move_bkgd.ply"
+EDIT_FILES[14]="job014_remove_bed.ply"
+EDIT_FILES[15]="job015_remove_cabinet.ply"
+EDIT_FILES[16]="job016_remove_nightstand.ply"
+EDIT_FILES[17]="job017_remove_desk.ply"
+
+for JOB_IDX in 5 6 7 8 9 10 11 12 13 14 15 16 17; do
+    JOB_TAG=$(printf "job%03d" ${JOB_IDX})
+    SCENE_ID=scene0000_00
+    MODEL_ID=${SCENE_ID}_${JOB_TAG}_bkgd
+    COMP_DIR=repo/scannet/processed/${SCENE_ID}/completion/${MODEL_ID}
+    EDIT_FILE=${EDIT_DIR}/${EDIT_FILES[$JOB_IDX]}
+
+    echo ""
+    echo "[$(date)] ===== ${MODEL_ID} ====="
+
+    # Skip if already fully done
+    if [ -f "${COMP_DIR}/completed_scene_pointcloud.ply" ]; then
+        echo "[skip] already complete"
+        continue
+    fi
+
+    # ── Step 1: Prepare crop + ConvONet config ─────────────────────────
+    if [ ! -f "${COMP_DIR}/convonet_prepared.ok" ]; then
+        echo "[step 1] prepare"
+        $PY repo/scannet/prepare_remove_completion.py \
+            --job-index ${JOB_IDX} \
+            --edit-file ${EDIT_FILE} \
+            --convonet-inherit-from ${INHERIT_CFG} \
+            --convonet-model-file ${MODEL_FILE} \
+            --model-id-override ${MODEL_ID}
+    else
+        echo "[step 1] already prepared — skipping"
+    fi
+
+    # ── Step 2: ConvONet generate (GPU) ────────────────────────────────
+    CFG=${CONVONET}/configs/pointcloud_crop/hypo3d_${MODEL_ID}.yaml
+    OFF_FILE=${CONVONET}/out/hypo3d_${MODEL_ID}/generation/meshes/scannet_remove/${MODEL_ID}.off
+
+    if [ ! -f "${COMP_DIR}/convonet_completed_mesh.off" ]; then
+        echo "[step 2] convonet generate"
+        cd ${CONVONET}
+        $PY generate.py ${CFG}
+        cd /rds/general/user/qp23/home/Hypo3D
+        cp "${OFF_FILE}" "${COMP_DIR}/convonet_completed_mesh.off"
+        echo "[step 2] mesh saved"
+    else
+        echo "[step 2] mesh already exists — skipping"
+    fi
+
+    # ── Step 3: Merge + sample ─────────────────────────────────────────
+    echo "[step 3] merge"
+    $PY repo/scannet/merge_completion_scene.py \
+        --completion-dir ${COMP_DIR} \
+        --use-fill-region --fill-region-dilation 0.08
+
+    # ── Step 4: Filter by structural fill ─────────────────────────────
+    echo "[step 4] filter"
+    $O3D filter_by_structural_fill.py --job ${JOB_IDX} --threshold 0.35
+
+    # ── Step 5: Re-merge with filtered samples ─────────────────────────
+    echo "[step 5] re-merge"
+    $PY repo/scannet/merge_completion_scene.py \
+        --completion-dir ${COMP_DIR} \
+        --use-fill-region --fill-region-dilation 0.08 --use-existing-samples
+
+    # ── Step 6: Poisson fill-region ────────────────────────────────────
+    echo "[step 6] poisson fill-region"
+    $O3D repo/scannet/poisson_completion.py \
+        --completion-dir ${COMP_DIR} --depth 9 --max-dist 0.15 \
+        --out-name poisson_completion_mesh.ply
+
+    # ── Step 7: Poisson full scene ─────────────────────────────────────
+    echo "[step 7] poisson full scene"
+    $O3D repo/scannet/poisson_completion.py \
+        --completion-dir ${COMP_DIR} --full-scene --depth 9 --max-dist 0.05 \
+        --out-name poisson_scene_mesh.ply
+
+    # ── Step 8: Mesh → point cloud ─────────────────────────────────────
+    echo "[step 8] mesh to pointcloud"
+    $O3D repo/scannet/mesh_to_pointcloud.py --completion-dir ${COMP_DIR}
+
+    # ── Step 9: Visualize ──────────────────────────────────────────────
+    echo "[step 9] visualize"
+    $O3D visualize_bkgd_comparison.py --job ${JOB_IDX} || true
+
+    echo "[$(date)] ===== ${MODEL_ID} done ====="
+done
+
+echo ""
+echo "[$(date)] All scene0000_00 jobs complete."

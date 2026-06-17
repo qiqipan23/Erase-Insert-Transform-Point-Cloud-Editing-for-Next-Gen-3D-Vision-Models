@@ -1,0 +1,122 @@
+#!/bin/bash
+#PBS -N completion_all_gpu
+#PBS -J 1-791
+#PBS -l select=1:ncpus=2:mem=8gb:ngpus=1
+#PBS -l walltime=06:00:00
+#PBS -q v1_gpu72
+#PBS -o completion_all_logs/gpu_^array_index^.log
+#PBS -e completion_all_logs/gpu_^array_index^.err
+
+set -e
+cd /rds/general/user/qp23/home/Hypo3D
+
+PLACEIT=/rds/general/user/qp23/home/miniconda3/envs/placeit3d/bin/python
+O3D=/rds/general/user/qp23/home/miniconda3/envs/o3d/bin/python
+export LD_LIBRARY_PATH=/rds/general/user/qp23/home/miniconda3/envs/placeit3d/lib:$LD_LIBRARY_PATH
+
+CONVONET_ROOT=/rds/general/user/qp23/home/Hypo3D/repo/convolutional_occupancy_networks
+MODEL_FILE=${CONVONET_ROOT}/out/hypo3d_scannet_remove_train_test/model.pt
+INHERIT_CFG=configs/pointcloud_crop/hypo3d_scannet_remove_train_test.yaml
+JOBS_FILE=repo/scannet/derived/remove_job_indices.txt
+
+# Map PBS array index (1-based) to JSONL line index
+JOB_LINE=$(sed -n "${PBS_ARRAY_INDEX}p" ${JOBS_FILE})
+
+# Derive scene ID and paths
+SCENE_ID=$($O3D -c "
+import json
+jobs = [json.loads(l) for l in open('repo/scannet/derived/generated_jobs_clean.jsonl') if l.strip()]
+print(jobs[${JOB_LINE}]['scene_id'])
+")
+JOB_TAG=$(printf "%03d" ${JOB_LINE})
+COMP_DIR=repo/scannet/processed/${SCENE_ID}/completion/${SCENE_ID}_job${JOB_TAG}
+
+echo "[$(date)] array=${PBS_ARRAY_INDEX} job=${JOB_LINE} scene=${SCENE_ID} tag=${JOB_TAG}"
+
+# ── Skip if fully done ─────────────────────────────────────────────────────
+if [ -f "${COMP_DIR}/poisson_scene_mesh.ply" ] && [ -f "${COMP_DIR}/completed_scene_pointcloud.ply" ] && [ -f "${COMP_DIR}/remove_comparison.png" ] && [ -f "${COMP_DIR}/convonet_prepared.ok" ]; then
+    echo "Already complete — skipping."
+    exit 0
+fi
+
+# ── Step 1: Prepare (generates ConvONet config + fill_region.json) ─────────
+if [ ! -f "${COMP_DIR}/convonet_completed_mesh.off" ] || [ ! -f "${COMP_DIR}/convonet_prepared.ok" ]; then
+    echo "[step 1] prepare_remove_completion"
+    $PLACEIT repo/scannet/prepare_remove_completion.py \
+      --job-index ${JOB_LINE} \
+      --convonet-inherit-from ${INHERIT_CFG} \
+      --convonet-model-file ${MODEL_FILE}
+
+    # ── Step 2: ConvONet generate (GPU) ───────────────────────────────────
+    echo "[step 2] convonet generate (GPU)"
+    CFG=${CONVONET_ROOT}/configs/pointcloud_crop/hypo3d_${SCENE_ID}_job${JOB_TAG}.yaml
+    cd ${CONVONET_ROOT}
+    $PLACEIT generate.py ${CFG}
+    cd /rds/general/user/qp23/home/Hypo3D
+
+    # Copy generated mesh into completion dir
+    OFF_SRC=${CONVONET_ROOT}/out/hypo3d_${SCENE_ID}_job${JOB_TAG}/generation/meshes/scannet_remove/${SCENE_ID}_job${JOB_TAG}.off
+    cp ${OFF_SRC} ${COMP_DIR}/convonet_completed_mesh.off
+    echo "[step 2] mesh saved: $(du -sh ${COMP_DIR}/convonet_completed_mesh.off | cut -f1)"
+else
+    echo "[step 1+2] convonet mesh already exists — skipping"
+fi
+
+# ── Step 3: Merge completion scene (color + sample + merge) ───────────────
+if [ ! -f "${COMP_DIR}/completed_scene_merged.ply" ]; then
+    echo "[step 3] merge_completion_scene"
+    $PLACEIT repo/scannet/merge_completion_scene.py \
+      --completion-dir ${COMP_DIR}
+else
+    echo "[step 3] completed_scene_merged.ply exists — skipping"
+fi
+
+# ── Step 4: Poisson fill-region patch ─────────────────────────────────────
+if [ ! -f "${COMP_DIR}/poisson_completion_mesh.ply" ]; then
+    echo "[step 4] poisson fill region"
+    $O3D repo/scannet/poisson_completion.py \
+      --completion-dir ${COMP_DIR} \
+      --depth 9 --max-dist 0.15 \
+      --out-name poisson_completion_mesh.ply
+else
+    echo "[step 4] poisson_completion_mesh.ply exists — skipping"
+fi
+
+# ── Step 5: Poisson full scene ────────────────────────────────────────────
+if [ ! -f "${COMP_DIR}/poisson_scene_mesh.ply" ]; then
+    echo "[step 5] poisson full scene"
+    $O3D repo/scannet/poisson_completion.py \
+      --completion-dir ${COMP_DIR} \
+      --full-scene --depth 9 --max-dist 0.05 \
+      --out-name poisson_scene_mesh.ply
+else
+    echo "[step 5] poisson_scene_mesh.ply exists — skipping"
+fi
+
+# ── Step 6: Merge scan mesh (skip if no vh_clean_2.ply for this scene) ────
+SCAN_MESH=repo/scannet/scans/${SCENE_ID}/${SCENE_ID}_vh_clean_2.ply
+if [ ! -f "${COMP_DIR}/scan_mesh_with_completion.ply" ]; then
+    if [ -f "${SCAN_MESH}" ]; then
+        echo "[step 6] merge_scan_mesh"
+        $O3D repo/scannet/merge_scan_mesh.py --job-index ${JOB_LINE}
+    else
+        echo "[step 6] no vh_clean_2.ply for ${SCENE_ID} — skipping merge_scan_mesh"
+    fi
+else
+    echo "[step 6] scan_mesh_with_completion.ply exists — skipping"
+fi
+
+# ── Step 7: Mesh → point cloud + merge with scan crop ─────────────────────
+if [ ! -f "${COMP_DIR}/completed_scene_pointcloud.ply" ]; then
+    echo "[step 7] mesh_to_pointcloud"
+    $O3D repo/scannet/mesh_to_pointcloud.py \
+      --completion-dir ${COMP_DIR}
+else
+    echo "[step 7] completed_scene_pointcloud.ply exists — skipping"
+fi
+
+# ── Step 8: Visualize ─────────────────────────────────────────────────────
+echo "[step 8] visualize"
+$O3D visualize_remove_comparison.py --scene ${SCENE_ID} --job ${JOB_LINE}
+
+echo "[$(date)] Done — array=${PBS_ARRAY_INDEX} job=${JOB_LINE}"

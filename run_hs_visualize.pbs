@@ -1,0 +1,23 @@
+#!/bin/bash
+#PBS -N hs_visualize
+#PBS -l select=1:ncpus=4:mem=16gb
+#PBS -l walltime=00:30:00
+#PBS -q v1_small24
+
+set -e
+cd /rds/general/user/qp23/home/Hypo3D
+
+source /rds/general/user/qp23/home/miniconda3/etc/profile.d/conda.sh
+conda activate placeit3d
+export LD_LIBRARY_PATH=/rds/general/user/qp23/home/miniconda3/envs/placeit3d/lib:$LD_LIBRARY_PATH
+
+python repo/scannet/hidden_surface/visualize_seeded_predictions.py \
+    --checkpoint repo/scannet/completion/hidden_surface_seeded_out/model_best.pt \
+    --dataset-roots repo/scannet/completion/hs_completion_wall \
+                    repo/scannet/completion/hs_completion_floor \
+    --split test \
+    --n-examples 3 \
+    --no-cuda \
+    --out-dir repo/scannet/completion/hidden_surface_seeded_out/vis
+
+echo "Done."

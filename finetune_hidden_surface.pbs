@@ -1,0 +1,56 @@
+#!/bin/bash
+#PBS -N hs_finetune
+#PBS -l select=1:ncpus=4:mem=32gb:ngpus=1
+#PBS -l walltime=06:00:00
+#PBS -q v1_gpu72
+
+set -e
+cd /rds/general/user/qp23/home/Hypo3D
+
+source /rds/general/user/qp23/home/miniconda3/etc/profile.d/conda.sh
+conda activate placeit3d
+export LD_LIBRARY_PATH=/rds/general/user/qp23/home/miniconda3/envs/placeit3d/lib:$LD_LIBRARY_PATH
+
+ORIG_BEST=repo/scannet/completion/hidden_surface_scannet_train_out/model_best.pt
+OUT_DIR=repo/scannet/completion/hidden_surface_finetune_out
+CONFIG=repo/scannet/completion/hidden_surface_finetune_config.json
+
+mkdir -p ${OUT_DIR}
+
+# Initialise from model_best.pt — wrap it so the training script sees it
+# as a resumable checkpoint (adds epoch=0 and a fresh optimizer state)
+python - << 'PYEOF'
+import torch, json
+from pathlib import Path
+from hidden_surface.hidden_surface_model import HiddenSurfacePointNet
+
+cfg = json.loads(Path("repo/scannet/completion/hidden_surface_finetune_config.json").read_text())
+device = torch.device("cpu")
+
+model = HiddenSurfacePointNet(
+    input_feature_dim=cfg["input_feature_dim"],
+    hidden_dim=cfg["model"]["hidden_dim"],
+    latent_dim=cfg["model"]["latent_dim"],
+    output_points=cfg["model"]["output_points"],
+    predict_color=False,
+).to(device)
+
+# Load weights from model_best.pt
+best = torch.load("repo/scannet/completion/hidden_surface_scannet_train_out/model_best.pt",
+                  map_location=device)
+model.load_state_dict(best["model"])
+
+optimizer = torch.optim.Adam(model.parameters(), lr=cfg["lr"])
+torch.save({
+    "epoch": 0,
+    "model": model.state_dict(),
+    "optimizer": optimizer.state_dict(),
+    "best_val": best.get("best_val", float("inf")),
+}, "repo/scannet/completion/hidden_surface_finetune_out/model.pt")
+print("[init] Saved initialised checkpoint from model_best.pt → finetune_out/model.pt")
+PYEOF
+
+echo "Starting fine-tune training..."
+python repo/scannet/hidden_surface/train_hidden_surface_completion.py ${CONFIG}
+
+echo "Done."

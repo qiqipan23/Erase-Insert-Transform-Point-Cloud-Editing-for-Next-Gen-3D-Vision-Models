@@ -1,0 +1,16 @@
+#!/bin/bash
+#PBS -N upload_mask_train
+#PBS -l select=1:ncpus=2:mem=4gb
+#PBS -l walltime=01:00:00
+#PBS -q v1_small24
+
+cd /rds/general/user/qp23/home/Hypo3D
+
+source /rds/general/user/qp23/home/miniconda3/etc/profile.d/conda.sh
+
+~/bin/rclone copy \
+    repo/scannet/completion/convonet_scannet_remove_retrain \
+    "gdrive:Hypo3D/convonet_data_mask_train" \
+    --progress --transfers 8
+
+echo "[$(date)] Upload complete"

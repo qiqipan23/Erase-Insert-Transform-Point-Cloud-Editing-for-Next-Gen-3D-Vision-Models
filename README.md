@@ -21,7 +21,7 @@
 ## 📣 Latest Updates
 
 - **[2025-05-01]** 🎉 *Hypo3D has been accepted to ICML 2025!*
-- **[2025-02-04]** 📝 *Hypo3D paper preprint is now available on [arXiv](https://arxiv.org/abs/your-link).*
+- **[2025-02-04]** 📝 *Hypo3D paper preprint is now available on [arXiv](https://arxiv.org/abs/2502.00954).*
 - **[2025-02-09]** 📊 *Hypo3D benchmark has been released.*
 - **[2025-02-09]** 🧪 *Evaluation scripts for multiple vision-language models are now publicly available.*
 
@@ -40,77 +40,213 @@
 
 ![sicl](docs/static/fig1.png)
 
+---
+
 ## About this code
-The Hypo3D codebase is written in Python and provides simple modules for benchmarking 10 Foundation models, including LLM, 2D VLMs, and 3D VLMs. The core module structure is as follows:
+
+The Hypo3D codebase provides evaluation scripts for the original benchmark (Part A) and a rendered-edit MOVE pipeline (Part B) that physically executes object movements and re-evaluates models on the resulting scenes.
+
 ```
 Hypo3D/
-├── LLM/                          # Storing scripts for LLM models that use scene captions as input for 3D scene processing.
-│   ├── GPT4o-text.               # Folder for evaluating GPT4o in text-only mode.
-│   ├── llama/                    # Folder for evaluating LLama3.2 3B.
-├── 2D-VLM/                       # Storing scripts for 2D-VLM models that use top-view maps as input for 3D scene processing.
-│   ├── Claude/                   # Folder for evaluating Claude 3.5 Sonnet.
-│   ├── GPT4o/                    # Folder for evaluating GPT4o in vison-language mode.
-│   ├── Qwen2-VL/                 # Folder for evaluating Qwen2-VL 7B and 72B.
-│   ├── llava-ov/                 # Folder for evaluating LLaVA-OV 7B and 72B.
-├── 3D-VLM/                       # Storing scripts for 2D-VLM models that use point cloud/multi-view images as input for 3D scene processing.
-│   ├── LLaVA-3D/                 # Folder for evaluating LLaVA-3D model 7B.
-│   └── LEO/ (coming soon)        # Folder for evaluating LEO model 7B.
-├── exp/                          # Experiemental results for various models.
-├── metric_compute.py             # Compute exact match/partial match for each context change category.
-├── ...
-
+├── LLM/                              # Text-only LLM evaluation
+│   ├── GPT4o-text/                   # GPT-4o text-only mode
+│   └── llama/                        # LLaMA-3.2 3B
+├── 2D-VLM/                           # 2D vision-language model evaluation
+│   ├── Claude/
+│   │   ├── evaluate.py               # Original benchmark
+│   │   └── evaluate_move.py          # MOVE pipeline renders
+│   ├── GPT4o/
+│   │   ├── evaluate.py               # Original benchmark
+│   │   ├── evaluate_move.py          # MOVE renders (unlabelled)
+│   │   ├── evaluate_move_dense_v2.py # MOVE renders (dense, v2)
+│   │   ├── evaluate_move_labelled.py # MOVE renders (with labels)
+│   │   └── evaluate_move_labelled_hires.py  # MOVE renders (hi-res 1600px)
+│   ├── Qwen2-VL/
+│   └── llava-ov/
+├── exp/                              # Evaluation results (JSON)
+├── dataset.py                        # Dataset loading utilities
+├── metric_compute.py                 # EM / PM metric computation
+├── inference_pipeline.sh             # End-to-end run script (Parts A + B)
+│
+├── # ── MOVE pipeline ──────────────────────────────────────────
+├── run_move_pipeline_v2.pbs          # PBS: run edit jobs (array job)
+├── rerender_and_build_eval_v2.py     # Re-render top-view images post-edit
+├── rerender_denser.py                # Dense top-view renderer
+├── patch_bkgd_pointclouds.py        # Patch ConvONet input with fill points
+├── combine_move_result.py            # Merge completed bkgd + placed object
+├── eval_move_metrics.py              # Geometric metrics (relation, placement)
+├── eval_round_trip.py                # Round-trip consistency evaluation
+│
+├── # ── Scene completion ────────────────────────────────────────
+├── run_convonet_bkgd.pbs             # PBS: ConvONet background completion
+├── run_completion_all.pbs            # PBS: all completion jobs
+├── run_completion_all_gpu.pbs        # PBS: GPU completion variant
+│
+├── # ── Object placement ────────────────────────────────────────
+├── run_pbic_inst.pbs                 # PBS: SCCNet instance completion
+├── run_pbic_inst.py                  # SCCNet runner script
+├── run_reconstruct_object.pbs        # PBS: object reconstruction
+│
+├── # ── Preprocessing ───────────────────────────────────────────
+├── filter_scannet.py                 # Filter to ScanNet scenes only
+├── extract_inst_ply.py               # Extract per-instance PLY files
+├── merge_inst_with_color.py          # Merge instance colours
+├── compute_scene_orientation_contexts.py
+│
+├── # ── Training ────────────────────────────────────────────────
+├── train_convonet_finetune.pbs       # PBS: ConvONet fine-tuning
+├── train_hidden_surface_seeded.pbs   # PBS: hidden surface model training
+├── finetune_hidden_surface.pbs       # PBS: hidden surface fine-tuning
+├── merge_hidden_surface_datasets.py  # Merge HS training data
+│
+└── # ── Figure generation ───────────────────────────────────────
+    └── generate_*.py                 # Dissertation / paper figure scripts
 ```
 
-### Download the Hypo3D Benchmark
-1. Clone the repository recursively.
-   ```
-   git clone --recursive https://github.com/MatchLab-Imperial/Hypo3D.git
-   ```
-3. Download 3D scene representations in Hypo3D dataset
-   ```
-   git clone https://huggingface.co/datasets/MatchLab/Hypo3D
-   mv Hypo3D dataset # rename dataset folder
-   cd dataset
-   ```
-   Expected data folder format:
-   ```
-    dataset/
-    ├── LLM_data/                                          # Scene captions for Large Language Models (e.g., LLama3.2)
-    ├── 2D_VLM_data/                                       # Scene Top-View Maps for 2D Vision-Language Models (e.g., GPT4o)
-    │   ├── top_view_no_label_rotated/                     # Non-semantic top-view map.
-    │   ├── top_view_with_label_rotated/                   # Semantic top-view map.
-    ├── 3D_VLM_data/                                       # 3D Scene Data for 3D Vision-Language Models (e.g., LLaVA-3D)
-  
-    ```
-5. Complete the [form](https://forms.gle/w6NCaDjY9FzdSZFEA) to download Hypo3D dataset
+---
 
-### 📊 Hypo3D: EM (Exact Match) / PM (Partial Match) Accuracy of Foundation Models
+## Setup
 
-| Model Family                    | Model                  | EM (%) | PM (%) |
-|--------------------------------|------------------------|--------|--------|
-| **LLM (Scene Caption)**        | Llama-3.2 3B           | 26.08  | 29.91  |
-|                                | GPT-4o API (Text)      | **35.54**  | **39.65**  |
-| **2D VLM (Non-Semantic Map)**  | Qwen2-VL 7B            | 29.68  | 34.47  |
-|                                | Qwen2-VL 72B           | 33.39  | 37.51  |
-|                                | LLaVA-OV 7B            | 30.62  | 34.34  |
-|                                | LLaVA-OV 72B           | **36.38**  | **40.13**  |
-|                                | Claude 3.5 Sonnet API  | 20.70  | 30.12  |
-|                                | GPT-4o API             | 33.58  | 36.75  |
-| **2D VLM (Semantic Map)**      | Qwen2-VL 7B            | 34.40  | 38.91  |
-|                                | Qwen2-VL 72B           | 42.45  | 48.25  |
-|                                | LLaVA-OV 7B            | 38.93  | 43.51  |
-|                                | LLaVA-OV 72B           | 43.81  | 46.83  |
-|                                | Claude 3.5 Sonnet API  | 41.36  | 51.59  |
-|                                | GPT-4o API             | **45.50**  | **48.82**  |
-| **3D VLM (RGB-D Video/Point Cloud)**       | LEO 7B                 | 14.83  | 22.40  |
-|                                | LLaVA-3D 7B            | **31.56**  | **35.23**  |
-| **Human**                      |                        | 91.00  | 92.50  |
+### 1. Clone
 
+```bash
+git clone --recursive https://github.com/MatchLab-Imperial/Hypo3D.git
+cd Hypo3D
+```
+
+### 2. Download the benchmark data
+
+```bash
+git clone https://huggingface.co/datasets/MatchLab/Hypo3D
+mv Hypo3D dataset
+```
+
+Expected layout:
+```
+dataset/
+├── contextvqa.json                   # Full benchmark QA pairs
+├── LLM_data/                         # Scene captions (for LLMs)
+├── 2D_VLM_data/
+│   ├── top_view_no_label_rotated/    # Unlabelled top-view maps
+│   └── top_view_with_label_rotated/  # Labelled top-view maps
+└── 3D_VLM_data/                      # Point clouds / RGB-D (for 3D VLMs)
+```
+
+Complete the [data access form](https://forms.gle/w6NCaDjY9FzdSZFEA) to download.
+
+### 3. API keys (for GPT-4o / Claude evaluation)
+
+```bash
+export OPENAI_API_KEY=sk-...
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+---
+
+## Running the evaluation
+
+### Part A — Original Hypo3D benchmark
+
+Evaluate models on the static scene + text change description setting:
+
+```bash
+bash inference_pipeline.sh   # runs all models end-to-end
+```
+
+Or run individual models:
+
+```bash
+# GPT-4o (vision)
+python 2D-VLM/GPT4o/evaluate.py -f dataset/contextvqa.json
+
+# Claude 3.5 Sonnet
+python 2D-VLM/Claude/evaluate.py -f dataset/contextvqa.json
+
+# GPT-4o text-only
+python LLM/GPT4o-text/evaluate.py -f dataset/contextvqa.json
+
+# Compute EM/PM metrics
+python metric_compute.py
+```
+
+### Part B — MOVE rendered-edit pipeline
+
+The MOVE pipeline physically executes object movements in ScanNet scenes, renders top-view images of the edited scene, and re-evaluates models on those renders. Requires HPC access (PBS scheduler) and the third-party repos under `repo/`.
+
+```bash
+# B1: Run edit jobs across all scenes (PBS array, ~3h on GPU)
+qsub run_move_pipeline_v2.pbs
+
+# B2: Background scene completion (ConvONet)
+python patch_bkgd_pointclouds.py   # patch fill points into ConvONet input
+qsub run_convonet_bkgd.pbs
+
+# B3: Object instance completion (SCCNet/PBIC)
+qsub run_pbic_inst.pbs
+
+# B4: Combine completed background + placed object
+python combine_move_result.py
+
+# B5: Re-render top-view images
+python rerender_and_build_eval_v2.py
+
+# B6: VQA evaluation on rendered scenes
+python 2D-VLM/GPT4o/evaluate_move_dense_v2.py --run       # no labels
+python 2D-VLM/GPT4o/evaluate_move_labelled.py --run       # with labels
+python 2D-VLM/GPT4o/evaluate_move_labelled_hires.py --run # hi-res (1600px)
+
+# B7: Compute metrics
+python eval_move_metrics.py    # geometric: relation accuracy, placement error
+python eval_round_trip.py      # round-trip consistency
+
+# B8: Generate comparison figure
+python generate_orig_vs_pipeline.py
+```
+
+---
+
+## 📊 Results
+
+### Part A — Original Hypo3D benchmark
+
+| Model Family | Model | EM (%) | PM (%) |
+|---|---|---|---|
+| **LLM (Scene Caption)** | Llama-3.2 3B | 26.08 | 29.91 |
+| | GPT-4o (text) | **35.54** | **39.65** |
+| **2D VLM (No labels)** | Qwen2-VL 7B | 29.68 | 34.47 |
+| | Qwen2-VL 72B | 33.39 | 37.51 |
+| | LLaVA-OV 7B | 30.62 | 34.34 |
+| | LLaVA-OV 72B | **36.38** | **40.13** |
+| | Claude 3.5 Sonnet | 20.70 | 30.12 |
+| | GPT-4o | 33.58 | 36.75 |
+| **2D VLM (Semantic labels)** | Qwen2-VL 7B | 34.40 | 38.91 |
+| | Qwen2-VL 72B | 42.45 | 48.25 |
+| | LLaVA-OV 7B | 38.93 | 43.51 |
+| | LLaVA-OV 72B | 43.81 | 46.83 |
+| | Claude 3.5 Sonnet | 41.36 | 51.59 |
+| | GPT-4o | **45.50** | **48.82** |
+| **3D VLM** | LEO 7B | 14.83 | 22.40 |
+| | LLaVA-3D 7B | **31.56** | **35.23** |
+| **Human** | | 91.00 | 92.50 |
+
+### Part B — MOVE rendered-edit pipeline (GPT-4o, ~1k matched Movement questions)
+
+| Condition | Overall PM (%) | Direction | Scale | Semantic |
+|---|---|---|---|---|
+| Original Hypo3D (text + original scene) | 35.2 | 18.1 | 47.7 | 5.6 |
+| Pipeline render — no labels | 33.9 | 20.9 | 44.0 | 6.1 |
+| Pipeline render — with labels | 32.8 | 18.9 | 43.0 | 7.1 |
+| Pipeline render — hi-res labels (1600px) | **35.0** | **24.9** | 43.4 | **9.2** |
+
+Rendering the physically-edited scene at high resolution with instance labels matches text-based hypothetical reasoning on the original scene, with a notable improvement in directional reasoning (+6.8 pp over the text baseline).
+
+---
 
 ## Contact
+
 - Ye Mao: ye.mao21@imperial.ac.uk
 
-Please open an issue or submit a pull request for issues, or contributions.
+Please open an issue or submit a pull request for bugs or contributions.
 
 ## 💼 License
 
@@ -120,9 +256,9 @@ Please open an issue or submit a pull request for issues, or contributions.
 
 ## Citation
 
-If you find our benchmark is helpful, please cite our paper:
+If you find our benchmark helpful, please cite our paper:
 
-```
+```bibtex
 @article{mao2025hypo3d,
   title={Hypo3D: Exploring Hypothetical Reasoning in 3D},
   author={Mao, Ye and Luo, Weixun and Jing, Junpeng and Qiu, Anlan and Mikolajczyk, Krystian},
@@ -130,4 +266,3 @@ If you find our benchmark is helpful, please cite our paper:
   year={2025}
 }
 ```
-

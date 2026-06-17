@@ -1,49 +1,35 @@
+# dataset.py
 import json
-def load_json(json_file_path):
-    with open(json_file_path, "r") as json_file:
-        data = json.load(json_file)
-    return data
+from datasets import Dataset
 
-def save_json(data, json_file_path):
+def load_json(json_file_path: str):
+    with open(json_file_path, "r") as json_file:
+        return json.load(json_file)
+
+def save_json(data, json_file_path: str):
     with open(json_file_path, "w") as json_file:
         json.dump(data, json_file, indent=4)
 
+if __name__ == "__main__":
+    # Path on CX3 (repo root is ~/Hypo3D, file is in ~/Hypo3D/dataset/hypo3d.json)
+    raw = load_json("dataset/hypo3d.json")   # dict: scene_id -> list[change]
 
-from datasets import Dataset
+    # Flatten: one row per context change (best for pairing with PlaceIt3D)
+    rows = []
+    for scene_id, changes in raw.items():
+        for change_idx, change in enumerate(changes):
+            rows.append({
+                "scene_id": scene_id,
+                "change_idx": change_idx,
+                "context_change": change.get("context_change", ""),
+                "change_type": change.get("change_type", ""),
+                "questions_answers": change.get("questions_answers", []),  # list[dict]
+            })
 
-# # Load the dataset from a local file
-# dataset = load_dataset("csv", data_files="contextvqa.json")
+    dataset = Dataset.from_list(rows)
+    print(dataset)
+    print("Example row:", dataset[0])
 
-dataset = Dataset.from_dict(load_json("hypo3d.json"))
-dataset.push_to_hub("MatchLab/Hypo3D")
-
-
-
-
-# data = load_json("contextvqa.json")
-
-# reordered_data ={}
-# question_id = 0
-# for scene_id, scene in data.items():
-#     if 'scene' in scene_id:
-#         for change in scene:
-#             for qa in change['questions_answers']:
-#                 # in five digit format
-#                 qa['question_id'] = str(question_id).zfill(5)
-    
-#                 question_id += 1
-                
-#         reordered_data[scene_id] = scene
-        
-# for scene_id, scene in data.items():
-#     if 'scene' not in scene_id:
-#         for change in scene:
-#             for qa in change['questions_answers']:
-#                 # in five digit format
-#                 qa['question_id'] = str(question_id).zfill(5)
-    
-#                 question_id += 1
-#         reordered_data[scene_id] = scene
-        
-# save_json(reordered_data, "contextvqa_ordered.json")
+    # OPTIONAL: push to your own HF repo (you must be logged in on the cluster)
+    # dataset.push_to_hub("YOUR_HF_USERNAME/Hypo3D_changes")
 

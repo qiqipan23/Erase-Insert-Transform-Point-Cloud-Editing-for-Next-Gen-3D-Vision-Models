@@ -2,7 +2,11 @@ import json
 import re
 from word2number import w2n
 from collections import defaultdict
-from sentence_transformers import SentenceTransformer, util
+try:
+    from sentence_transformers import SentenceTransformer, util
+    _SBERT_AVAILABLE = True
+except Exception:
+    _SBERT_AVAILABLE = False
 
 def convert_words_to_digits(text):
     words = text.split()
@@ -136,7 +140,13 @@ def compute_result_each_question(total_questions_per_type, exact_matches_per_typ
         print(f"{question_type:<20} {exact_match_score_per_type:<10.2f}{average_partial_match_per_type:<10.2f}{average_sbert_score_per_type:<10.2f}")
         
 if __name__ == "__main__":
-    sbert_model = SentenceTransformer('all-MiniLM-L6-v2')
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-f", "--file", default="exp/contextvqa_Claude-3.5-Sonnet_no_label_rotated.json",
+                        help="Path to evaluated JSON with predicted_answer fields")
+    cli_args = parser.parse_args()
+
+    sbert_model = SentenceTransformer('all-MiniLM-L6-v2') if _SBERT_AVAILABLE else None
     total_questions = 0
     exact_matches = 0
     partial_match_scores = []
@@ -144,7 +154,7 @@ if __name__ == "__main__":
     exact_matches_per_type = {}
     partial_match_scores_per_type = {}
 
-    data = load_json('exp/contextvqa_Claude-3.5-Sonnet_no_label_rotated.json')
+    data = load_json(cli_args.file)
 
     total_questions_per_type = defaultdict(int)
     exact_matches_per_type = defaultdict(int)
@@ -161,7 +171,7 @@ if __name__ == "__main__":
         for change in changes_list:
             context_change = change['context_change']
             question_answers = change['questions_answers']
-            change_type = change['change_type']
+            change_type = change.get('change_type', 'Object Movement Change')
 
             for qa in question_answers:
                 question_type = qa['question_type']
